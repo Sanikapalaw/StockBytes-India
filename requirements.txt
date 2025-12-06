@@ -5,3 +5,4 @@ yfinance
 pandas
 textblob
 lxml
+plotly
