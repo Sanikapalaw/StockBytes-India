@@ -1,346 +1,231 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 import yfinance as yf
 from textblob import TextBlob
 import email.utils
+import plotly.graph_objects as go
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="StockBytes India", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="StockBytes India", page_icon="⚡", layout="wide")
 
-# Your Stock List
-STOCKS = dict(sorted({
-    "ABB.NS": "ABB India",
-    "ABBOTT.NS": "Abbott India",
-    "AAVAS.NS": "AAVAS Financiers",
-    "ADANIESOL.NS": "Adani Energy Solutions",
-    "ADANIENT.NS": "Adani Enterprises",
-    "ADANIGREEN.NS": "Adani Green",
-    "ADANIPOWER.NS": "Adani Power",
-    "ADANIPORTS.NS": "Adani Ports & SEZ",
-    "ADANITOTAL.NS": "Adani Total Gas",
-    "ADITYABIRLA.NS": "Aditya Birla Capital",
-    "AB_REAL_ESTATE": "A B Real Estate",
-    "AFCONS_INFRASTR": "Afcons Infrastr.",
-    "AHERA.NS": "Ahera Industries",
-    "ALEMBICLTD.NS": "Alembic Pharma",
-    "ALKEM.NS": "Alkem Laboratories",
-    "ALLIED_BLENDERS": "Allied Blenders",
-    "AMARA_RAJA_ENER": "Amara Raja Ener.",
-    "ANGELONE.NS": "Angel One",
-    "APOLLOHOSP.NS": "Apollo Hospitals",
-    "APOLLO.MED": "Apollo Medicals",
-    "ASHOKLEY.NS": "Ashok Leyland",
-    "ASAHI_INDIA_GLAS": "Asahi India Glas",
-    "ASIANPAINT.NS": "Asian Paints",
-    "ATHER_ENERGY": "Ather Energy",
-    "AUROBINDO.NS": "Aurobindo Pharma",
-    "AVENUESUPER.NS": "Avenue Supermarts",
-    "AXISBANK.NS": "Axis Bank",
-    "BATAINDIA.NS": "Bata India",
-    "BANKBARODA.NS": "Bank of Baroda",
-    "BAYERCROP.NS": "Bayer Crop Sci.",
-    "BELRISE_INDUSTRI": "Belrise Industri",
-    "BEML.NS": "BEML Ltd",
-    "BERGERPAINT.NS": "Berger Paints",
-    "BHARTIARTL.NS": "Bharti Airtel",
-    "BHARTIHEX.NS": "Bharti Hexacom",
-    "BHEL.NS": "BHEL",
-    "BLS_INTERNAT": "BLS Internat.",
-    "BLUEDART.NS": "Blue Dart Expres",
-    "BOSCHLTD.NS": "Bosch",
-    "BPCL.NS": "Bharat Petroleum Corporation Ltd",
-    "BRITANNIA.NS": "Britannia Industries",
-    "BROOKFIELD_INDIA": "Brookfield India",
-    "CAMS_SERVICES": "Cams Services",
-    "CAPLIN_POINT_LAB": "Caplin Point Lab",
-    "CAPRI_GLOBAL": "Capri Global",
-    "CARBORUNDUM_UNI": "Carborundum Uni.",
-    "CASTROLIND.NS": "Castrol India",
-    "CENTURY_PLYBOARD": "Century Plyboard",
-    "CESC.NS": "CESC",
-    "CHAMBLFERT.NS": "Chambal Fert.",
-    "CHOICE_INTL": "Choice Intl.",
-    "CHOLAFIN.NS": "Cholamandalam Investment & Finance",
-    "CIE_AUTOMOTIVE": "CIE Automotive",
-    "CIPLA.NS": "Cipla",
-    "CLEAN_SCIENCE": "Clean Science",
-    "COALINDIA.NS": "Coal India",
-    "COLPAL.NS": "Colgate-Palmolive",
-    "CONCORD_BIOTECH": "Concord Biotech",
-    "COROMANDEL.NS": "Coromandel International",
-    "CROMPTON_GR_CON": "Crompton Gr. Con",
-    "CUBE_HIGHWAYS": "Cube Highways",
-    "CUMMINSIND.NS": "Cummins India",
-    "DABUR.NS": "Dabur India",
-    "DEEPAKFERT.NS": "Deepak Fertilis.",
-    "DEEPAKNTR.NS": "Deepak Nitrite",
-    "DEVYANI.NS": "Devyani Intl.",
-    "DLF.NS": "DLF Ltd",
-    "DIVISLAB.NS": "Divi's Laboratories",
-    "DRREDDY.NS": "Dr Reddy's Laboratories",
-    "EID_PARRY": "EID Parry",
-    "EICHERMOT.NS": "Eicher Motors",
-    "EIH": "EIH",
-    "ELGI_EQUIPMENTS": "Elgi Equipments",
-    "EMBASSY_DEVELOP": "Embassy Develop",
-    "ETERNAL.NS": "Eternal Ltd",
-    "FSN.NS": "FSN E-Commerce (Nykaa)",
-    "FORCE_MOTORS": "Force Motors",
-    "FORTIS.NS": "Fortis Healthcare",
-    "GAIL.NS": "GAIL (India)",
-    "GABRIEL_INDIA": "Gabriel India",
-    "GALLANTT_ISPAT_L": "Gallantt Ispat L",
-    "GENINSUR.NS": "Gen Insur",
-    "GODAWARI_POWER": "Godawari Power",
-    "GODREJ_AGROVET": "Godrej Agrovet",
-    "GODREJCP.NS": "Godrej Consumer Products",
-    "GODREJPROP.NS": "Godrej Properties",
-    "GRANULES.NS": "Granules India",
-    "GMRINFRA.NS": "GMR Airports",
-    "HAVELLS.NS": "Havells India",
-    "HCLTECH.NS": "HCL Technologies",
-    "HDFCBANK.NS": "HDFC Bank",
-    "HDFCLIFE.NS": "HDFC Life Insurance",
-    "HDFCAMC.NS": "HDFC Asset Management",
-    "HEROMOTOCO.NS": "Hero MotoCorp",
-    "HINDALCO.NS": "Hindalco Industries",
-    "HINDUNILVR.NS": "Hindustan Unilever",
-    "HINDZINC.NS": "Hindustan Zinc",
-    "HITACHIENERGY.NS": "Hitachi Energy",
-    "HPCL.NS": "Hindustan Petroleum",
-    "HYUNDAI.NS": "Hyundai Motor India",
-    "ICICIBANK.NS": "ICICI Bank",
-    "ICICILOMBARD.NS": "ICICI Lombard",
-    "ICICIPRULI.NS": "ICICI Prudential Life",
-    "IDBI.NS": "IDBI Bank",
-    "IFCI": "IFCI",
-    "INDHOTEL.NS": "Indian Hotels Company",
-    "INDIANB.NS": "Indian Bank",
-    "INDIGO.NS": "InterGlobe Aviation",
-    "INDEGENE": "Indegene",
-    "INFY.NS": "Infosys",
-    "IOB.NS": "Indian Overseas Bank",
-    "IOC.NS": "Indian Oil Corporation",
-    "IRFC.NS": "IRFC",
-    "JSWENERGY.NS": "JSW Energy",
-    "JSWINFRA.NS": "JSW Infrastructure",
-    "JSWSTEEL.NS": "JSW Steel",
-    "JINDALSTAIN.NS": "Jindal Stainless",
-    "JINDALSTEL.NS": "Jindal Steel",
-    "KOTAKBANK.NS": "Kotak Mahindra Bank",
-    "LT.NS": "Larsen & Toubro",
-    "LUPIN.NS": "Lupin",
-    "MAZDOCK.NS": "Mazagon Dock",
-    "M&M.NS": "Mahindra & Mahindra",
-    "MANKIND.NS": "Mankind Pharma",
-    "MARICO.NS": "Marico",
-    "MARUTI.NS": "Maruti Suzuki",
-    "MAXHEALTH.NS": "Max Healthcare",
-    "MRF.NS": "MRF Ltd",
-    "MUTHOOTFIN.NS": "Muthoot Finance",
-    "NMDC.NS": "NMDC Ltd",
-    "NTPC.NS": "NTPC Limited",
-    "NTPCGREEN.NS": "NTPC Green Energy",
-    "NESTLEIND.NS": "Nestle India",
-    "OIL.NS": "Oil India",
-    "ONGC.NS": "Oil & Natural Gas Corporation",
-    "ONE97.NS": "One 97 Communications (Paytm)",
-    "PBFINTECH.NS": "PB Fintech (PolicyBazaar)",
-    "PERSISTENT.NS": "Persistent Systems",
-    "PIDILITIND.NS": "Pidilite Industries",
-    "POWERFIN.NS": "Power Finance Corporation",
-    "POWERGRID.NS": "Power Grid Corporation",
-    "PRESTIGE.NS": "Prestige Estates",
-    "RAILVIKAS.NS": "Rail Vikas Nigam",
-    "RELIANCE.NS": "Reliance Industries",
-    "RECLTD.NS": "REC Ltd",
-    "SAMVARDHAN.NS": "Samvardhana Motherson",
-    "SHREECEM.NS": "Shree Cement",
-    "SHRIRAMFIN.NS": "Shriram Finance",
-    "SBIN.NS": "State Bank of India",
-    "SBILIFE.NS": "SBI Life Insurance",
-    "SBICARD.NS": "SBI Cards",
-    "SUNPHARMA.NS": "Sun Pharma Industries",
-    "SUZLON.NS": "Suzlon Energy",
-    "SWIGGY.NS": "Swiggy",
-    "TATASTEEL.NS": "Tata Steel",
-    "TATAPOWER.NS": "Tata Power Company",
-    "TATAMOTORS.NS": "Tata Motors",
-    "TCS.NS": "Tata Consultancy Services",
-    "TECHM.NS": "Tech Mahindra",
-    "TITAN.NS": "Titan Company",
-    "TORNTPWR.NS": "Torn Power",
-    "TORNTPHARM.NS": "Torrent Pharmaceuticals",
-    "TUBEINV.NS": "Tube Investments",
-    "TVSMOTOR.NS": "TVS Motor Company",
-    "ULTRACEMCO.NS": "UltraTech Cement",
-    "UNIONBANK.NS": "Union Bank of India",
-    "UNOMINDA.NS": "Uno Minda",
-    "VARUNBEV.NS": "Varun Beverages",
-    "VEDANTA.NS": "Vedanta",
-    "VODAFONEIDEA.NS": "Vodafone Idea",
-    "WAAREE.NS": "Waaree Energies",
-    "WIPRO.NS": "Wipro",
-    "ZYDUSLIFE.NS": "Zydus Lifesciences",
-}.items(), key=lambda x: x[0].upper()))
+if 'watchlist' not in st.session_state:
+    st.session_state.watchlist = []
 
-# --- 2. SOURCE 1: GOOGLE NEWS FETCHER ---
+# --- 2. DATA: STOCKS & SECTOR MAPPING ---
+# I have grouped them so the app knows who competes with whom
+SECTORS = {
+    "IT": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
+    "Banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "AXISBANK.NS", "KOTAKBANK.NS"],
+    "Auto": ["TATAMOTORS.NS", "MARUTI.NS", "M&M.NS", "ASHOKLEY.NS", "HEROMOTOCO.NS"],
+    "Energy/Power": ["RELIANCE.NS", "ADANIENT.NS", "NTPC.NS", "POWERGRID.NS", "ONGC.NS", "TATAPOWER.NS"],
+    "Pharma": ["SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS"],
+    "Consumer": ["ITC.NS", "HINDUNILVR.NS", "TITAN.NS", "NESTLEIND.NS", "ASIANPAINT.NS"],
+    "Steel/Infra": ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "LT.NS"]
+}
+
+# Flatten this into your main dictionary
+STOCKS = {
+    "ABB.NS": "ABB India", "ABBOTT.NS": "Abbott India", "AAVAS.NS": "AAVAS Financiers",
+    "ADANIESOL.NS": "Adani Energy", "ADANIENT.NS": "Adani Enterprises", "ADANIGREEN.NS": "Adani Green",
+    "ADANIPOWER.NS": "Adani Power", "ADANIPORTS.NS": "Adani Ports", "ADANITOTAL.NS": "Adani Total Gas",
+    "ADITYABIRLA.NS": "Aditya Birla Cap", "AB_REAL_ESTATE": "AB Real Estate",
+    "AMARA_RAJA_ENER": "Amara Raja", "ANGELONE.NS": "Angel One", "APOLLOHOSP.NS": "Apollo Hosp",
+    "ASHOKLEY.NS": "Ashok Leyland", "ASIANPAINT.NS": "Asian Paints", "ATHER_ENERGY": "Ather Energy",
+    "AUROBINDO.NS": "Aurobindo Pharma", "AVENUESUPER.NS": "DMart", "AXISBANK.NS": "Axis Bank",
+    "BAJFINANCE.NS": "Bajaj Finance", "BAJAJFINSV.NS": "Bajaj Finserv",
+    "BANKBARODA.NS": "Bank of Baroda", "BATAINDIA.NS": "Bata India", "BEL.NS": "Bharat Electronics",
+    "BERGERPAINT.NS": "Berger Paints", "BHARTIARTL.NS": "Bharti Airtel", "BHEL.NS": "BHEL",
+    "BPCL.NS": "BPCL", "BRITANNIA.NS": "Britannia", "CIPLA.NS": "Cipla", "COALINDIA.NS": "Coal India",
+    "COLPAL.NS": "Colgate", "DABUR.NS": "Dabur", "DIVISLAB.NS": "Divis Lab", "DLF.NS": "DLF",
+    "DRREDDY.NS": "Dr Reddy", "EICHERMOT.NS": "Eicher Motors", "GAIL.NS": "GAIL",
+    "GODREJCP.NS": "Godrej CP", "GRASIM.NS": "Grasim", "HCLTECH.NS": "HCL Tech",
+    "HDFCBANK.NS": "HDFC Bank", "HDFCLIFE.NS": "HDFC Life", "HEROMOTOCO.NS": "Hero MotoCorp",
+    "HINDALCO.NS": "Hindalco", "HINDUNILVR.NS": "HUL", "ICICIBANK.NS": "ICICI Bank",
+    "ITC.NS": "ITC Ltd", "IOC.NS": "Indian Oil", "INDUSINDBK.NS": "IndusInd Bank",
+    "INFY.NS": "Infosys", "JSWSTEEL.NS": "JSW Steel", "KOTAKBANK.NS": "Kotak Bank",
+    "LT.NS": "Larsen & Toubro", "M&M.NS": "M&M", "MARUTI.NS": "Maruti Suzuki",
+    "NESTLEIND.NS": "Nestle", "NTPC.NS": "NTPC", "ONGC.NS": "ONGC", "POWERGRID.NS": "Power Grid",
+    "RELIANCE.NS": "Reliance Ind", "SBIN.NS": "SBI", "SBILIFE.NS": "SBI Life",
+    "SUNPHARMA.NS": "Sun Pharma", "TATAMOTORS.NS": "Tata Motors", "TATASTEEL.NS": "Tata Steel",
+    "TCS.NS": "TCS", "TECHM.NS": "Tech Mahindra", "TITAN.NS": "Titan",
+    "ULTRACEMCO.NS": "UltraTech", "UPL.NS": "UPL", "WIPRO.NS": "Wipro", "ZOMATO.NS": "Zomato"
+}
+
+# Sort logic
+STOCKS = dict(sorted(STOCKS.items(), key=lambda x: x[1]))
+
+def get_peers(current_ticker):
+    """Find competitors based on the sector map"""
+    for sector, tickers in SECTORS.items():
+        if current_ticker in tickers:
+            # Return top 3 peers, excluding self
+            return [t for t in tickers if t != current_ticker][:4] 
+    return []
+
+# --- 3. FETCH FUNCTIONS ---
 def fetch_google_news(company_name):
-    """Fetch 10 articles from Google RSS"""
     query = f'{company_name} share price target buy sell results when:1y'
     rss_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-IN&gl=IN&ceid=IN:en"
-    
     articles = []
     try:
         response = requests.get(rss_url, timeout=5)
         soup = BeautifulSoup(response.content, features="xml")
-        for item in soup.findAll('item')[:10]: # Limit to 10
-            # Parse Date
-            try:
-                pub_date_str = item.pubDate.text
-                # Convert to datetime object for sorting
-                pub_date_dt = email.utils.parsedate_to_datetime(pub_date_str).replace(tzinfo=None)
-            except:
-                pub_date_dt = datetime.now()
-
+        for item in soup.findAll('item')[:10]:
+            try: pub_date_dt = email.utils.parsedate_to_datetime(item.pubDate.text).replace(tzinfo=None)
+            except: pub_date_dt = datetime.now()
             articles.append({
-                "source_type": "Google",
-                "title": item.title.text.strip(),
+                "source_type": "Google", "title": item.title.text.strip(),
                 "source": item.source.text if item.source else "Google News",
-                "link": item.link.text,
-                "summary": BeautifulSoup(item.description.text, "html.parser").get_text(),
-                "published_dt": pub_date_dt, # For sorting
-                "published_str": pub_date_dt.strftime('%d %b %Y') # For display
+                "link": item.link.text, "summary": BeautifulSoup(item.description.text, "html.parser").get_text(),
+                "published_dt": pub_date_dt, "published_str": pub_date_dt.strftime('%d %b %Y')
             })
-    except Exception:
-        pass
+    except: pass
     return articles
 
-# --- 3. SOURCE 2: YAHOO FINANCE FETCHER ---
 def fetch_yahoo_news(ticker_symbol):
-    """Fetch latest news from Yahoo Finance API"""
+    if ".NS" not in ticker_symbol and ".BO" not in ticker_symbol: return []
     articles = []
-    # If the ticker isn't valid (no .NS), skip
-    if ".NS" not in ticker_symbol and ".BO" not in ticker_symbol:
-        return []
-
     try:
         stock = yf.Ticker(ticker_symbol)
-        yahoo_news = stock.news
-        
-        for item in yahoo_news:
-            # Parse Date (Yahoo gives Unix timestamp)
-            timestamp = item.get('providerPublishTime', 0)
-            pub_date_dt = datetime.fromtimestamp(timestamp)
-            
-            # Yahoo images often clutter, so we skip them and just take text
-            title = item.get('title', '')
-            link = item.get('link', '')
-            publisher = item.get('publisher', 'Yahoo Finance')
-            
+        for item in stock.news:
+            pub_date_dt = datetime.fromtimestamp(item.get('providerPublishTime', 0))
             articles.append({
-                "source_type": "Yahoo",
-                "title": title,
-                "source": f"Yahoo ({publisher})",
-                "link": link,
-                "summary": title, # Yahoo API often puts the summary in the title or separate
-                "published_dt": pub_date_dt,
-                "published_str": pub_date_dt.strftime('%d %b %Y')
+                "source_type": "Yahoo", "title": item.get('title', ''),
+                "source": f"Yahoo ({item.get('publisher', '')})",
+                "link": item.get('link', ''), "summary": item.get('title', ''),
+                "published_dt": pub_date_dt, "published_str": pub_date_dt.strftime('%d %b %Y')
             })
-    except Exception:
-        pass
+    except: pass
     return articles
 
-# --- 4. MERGE & SENTIMENT ENGINE ---
 @st.cache_data(ttl=600)
 def get_combined_news(ticker, company_name):
-    # 1. Get from both sources
-    g_news = fetch_google_news(company_name)
-    y_news = fetch_yahoo_news(ticker)
-    
-    # 2. Combine
-    all_news = g_news + y_news
-    
-    # 3. Sort by Date (Newest First)
+    all_news = fetch_google_news(company_name) + fetch_yahoo_news(ticker)
     all_news.sort(key=lambda x: x['published_dt'], reverse=True)
-    
-    # 4. Remove Duplicates (Simple check by Title)
-    seen_titles = set()
-    unique_news = []
-    for article in all_news:
-        if article['title'] not in seen_titles:
-            seen_titles.add(article['title'])
-            
-            # 5. Add Sentiment
-            blob = TextBlob(article['summary'])
-            article['sentiment'] = blob.sentiment.polarity
-            unique_news.append(article)
-            
-    return unique_news[:15] # Return top 15 combined
+    seen, unique = set(), []
+    for art in all_news:
+        if art['title'] not in seen:
+            seen.add(art['title'])
+            blob = TextBlob(art['summary'])
+            art['sentiment'] = blob.sentiment.polarity
+            unique.append(art)
+    return unique[:15]
 
-# --- 5. UI LAYOUT ---
+# --- 4. SIDEBAR ---
+st.sidebar.header("❤️ Watchlist")
+if st.session_state.watchlist:
+    for saved in st.session_state.watchlist:
+        if st.sidebar.button(f"{STOCKS.get(saved, saved)}", key=f"fav_{saved}"):
+            st.session_state.selected_ticker = saved
+            st.rerun()
+    if st.sidebar.button("Clear All"):
+        st.session_state.watchlist = []
+        st.rerun()
+else:
+    st.sidebar.caption("No favorites yet.")
+st.sidebar.markdown("---")
+
+st.sidebar.header("🔍 Search")
+search = st.sidebar.text_input("Type stock name:")
+filtered = {k: v for k, v in STOCKS.items() if search.lower() in k.lower() or search.lower() in v.lower()}
+
+# Selection Logic
+index = 0
+if 'selected_ticker' in st.session_state and st.session_state.selected_ticker in filtered:
+    index = list(filtered.keys()).index(st.session_state.selected_ticker) + 1
+
+selected_ticker = st.sidebar.selectbox("Select Stock:", ["--- Select ---"] + list(filtered.keys()), index=index)
+
+# Update session state if dropdown changes
+if selected_ticker != "--- Select ---":
+    st.session_state.selected_ticker = selected_ticker
+
+# --- 5. MAIN PAGE ---
 st.title("StockBytes India ⚡🇮🇳")
-st.caption("Aggregated News from Google & Yahoo Finance")
-
-# Sidebar
-st.sidebar.header("Controls")
-search_query = st.sidebar.text_input("Search Stock:")
-filtered_stocks = {k: v for k, v in STOCKS.items() if search_query.lower() in k.lower() or search_query.lower() in v.lower()}
-selected_ticker = st.sidebar.selectbox("Select Stock:", options=["--- Select ---"] + list(filtered_stocks.keys()))
 
 if selected_ticker != "--- Select ---":
     company_name = STOCKS[selected_ticker]
     
-    # Header
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.subheader(f"📰 {company_name}")
-    with col2:
+    # HEADER
+    c1, c2, c3 = st.columns([2, 1, 1])
+    c1.subheader(f"{company_name}")
+    
+    # Watchlist Button
+    with c2:
+        if selected_ticker in st.session_state.watchlist:
+            if st.button("💔 Unwatch"):
+                st.session_state.watchlist.remove(selected_ticker)
+                st.rerun()
+        else:
+            if st.button("❤️ Watch"):
+                st.session_state.watchlist.append(selected_ticker)
+                st.rerun()
+
+    # Price
+    if ".NS" in selected_ticker:
         try:
-            # Minimal Price Check
-            if ".NS" in selected_ticker:
-                data = yf.download(selected_ticker, period="1d", progress=False)
-                if not data.empty:
-                    price = data['Close'].iloc[-1]
-                    if isinstance(price, pd.Series): price = price.iloc[0]
-                    st.metric("Live Price", f"₹{price:.2f}")
-        except:
-            pass
-            
+            data = yf.download(selected_ticker, period="1d", progress=False)
+            if not data.empty:
+                price = data['Close'].iloc[-1]
+                if isinstance(price, pd.Series): price = price.iloc[0]
+                c3.metric("Live Price", f"₹{price:.2f}")
+        except: pass
+    
+    # --- NEW: QUICK COMPARE PEERS ---
+    peers = get_peers(selected_ticker)
+    if peers:
+        st.markdown("##### ⚡ Quick Compare:")
+        cols = st.columns(len(peers))
+        for idx, peer_ticker in enumerate(peers):
+            peer_name = STOCKS.get(peer_ticker, peer_ticker)
+            if cols[idx].button(peer_name, key=f"peer_{peer_ticker}"):
+                st.session_state.selected_ticker = peer_ticker
+                st.rerun()
+    
     st.markdown("---")
 
-    # Fetch Data
-    with st.spinner("Fetching news from Google & Yahoo..."):
+    # NEWS & GAUGE
+    with st.spinner("Analyzing Sentiment..."):
         news_list = get_combined_news(selected_ticker, company_name)
 
     if news_list:
-        for article in news_list:
-            # Sentiment Logic
-            s = article['sentiment']
-            if s > 0.05: emoji = "🟢"
-            elif s < -0.05: emoji = "🔴"
-            else: emoji = "⚪"
-            
-            # Badge for Source
-            source_badge = "G" if article['source_type'] == "Google" else "Y"
-            badge_color = "blue" if source_badge == "G" else "purple"
-
-            with st.expander(f"{emoji} [{source_badge}] {article['title']}"):
-                st.caption(f"Source: {article['source']} | Date: {article['published_str']}")
-                st.write(article['summary'])
-                st.markdown(f"[🔗 Read Full Article]({article['link']})")
+        avg_sentiment = sum(a['sentiment'] for a in news_list) / len(news_list)
         
-        # Download
-        st.markdown("---")
-        df = pd.DataFrame(news_list)
-        # Drop the datetime object before saving to CSV (it looks messy)
-        if not df.empty:
-            df = df.drop(columns=['published_dt'])
-        st.download_button("📥 Save News (CSV)", data=df.to_csv(index=False), file_name=f"{company_name}_news.csv")
+        # Gauge Chart
+        fig = go.Figure(go.Indicator(
+            mode = "gauge+number", value = avg_sentiment,
+            title = {'text': "AI Sentiment Score"},
+            gauge = {
+                'axis': {'range': [-1, 1]},
+                'bar': {'color': "darkblue"},
+                'steps': [
+                    {'range': [-1, -0.1], 'color': '#ffcccb'},
+                    {'range': [-0.1, 0.1], 'color': '#f0f2f6'},
+                    {'range': [0.1, 1], 'color': '#90ee90'}
+                ],
+            }
+        ))
+        fig.update_layout(height=200, margin=dict(l=20, r=20, t=30, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+
+        # News Feed
+        for article in news_list:
+            s = article['sentiment']
+            emoji = "🟢" if s > 0.05 else ("🔴" if s < -0.05 else "⚪")
+            badge = "G" if article['source_type'] == "Google" else "Y"
+            
+            with st.expander(f"{emoji} [{badge}] {article['title']}"):
+                st.caption(f"{article['published_str']} | {article['source']}")
+                st.write(article['summary'])
+                st.markdown(f"[Read More]({article['link']})")
+        
+        # CSV
+        df = pd.DataFrame(news_list).drop(columns=['published_dt']) if news_list else pd.DataFrame()
+        st.download_button("📥 Download CSV", df.to_csv(index=False), f"{company_name}.csv")
     else:
-        st.info("No recent news found.")
+        st.info("No recent news.")
 else:
-    st.info("👈 Select a stock to view aggregated news.")
+    st.info("👈 Select a stock to start.")
