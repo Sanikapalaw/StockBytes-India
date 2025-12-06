@@ -7,7 +7,7 @@ import yfinance as yf
 from textblob import TextBlob
 import email.utils
 
-# --- 1. APP CONFIGURATION ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="StockBytes India", page_icon="⚡", layout="centered")
 
 # Your Stock List
@@ -187,138 +187,160 @@ STOCKS = dict(sorted({
     "ZYDUSLIFE.NS": "Zydus Lifesciences",
 }.items(), key=lambda x: x[0].upper()))
 
-# --- 2. NEWS ENGINE ---
-@st.cache_data(ttl=600)
-def fetch_news(company_name, time_period_days):
-    """
-    Fetch limited (10) relevant news articles.
-    """
-    # 1. Set Time Parameter for Google
-    if time_period_days == 365:
-        time_param = "when:1y"
-    elif time_period_days == 180:
-        time_param = "when:6m"
-    else:
-        time_param = "when:30d"
-
-    # 2. Search Query (Strict Financial Focus)
-    query = f'{company_name} share price target buy sell results {time_param}'
-    query = query.replace(" ", "+")
+# --- 2. SOURCE 1: GOOGLE NEWS FETCHER ---
+def fetch_google_news(company_name):
+    """Fetch 10 articles from Google RSS"""
+    query = f'{company_name} share price target buy sell results when:1y'
+    rss_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-IN&gl=IN&ceid=IN:en"
     
-    rss_url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
-
+    articles = []
     try:
-        response = requests.get(rss_url, timeout=10)
-        response.raise_for_status()
+        response = requests.get(rss_url, timeout=5)
         soup = BeautifulSoup(response.content, features="xml")
-        items = soup.findAll('item')
+        for item in soup.findAll('item')[:10]: # Limit to 10
+            # Parse Date
+            try:
+                pub_date_str = item.pubDate.text
+                # Convert to datetime object for sorting
+                pub_date_dt = email.utils.parsedate_to_datetime(pub_date_str).replace(tzinfo=None)
+            except:
+                pub_date_dt = datetime.now()
 
-        articles = []
-        cutoff_date = datetime.now() - timedelta(days=time_period_days)
+            articles.append({
+                "source_type": "Google",
+                "title": item.title.text.strip(),
+                "source": item.source.text if item.source else "Google News",
+                "link": item.link.text,
+                "summary": BeautifulSoup(item.description.text, "html.parser").get_text(),
+                "published_dt": pub_date_dt, # For sorting
+                "published_str": pub_date_dt.strftime('%d %b %Y') # For display
+            })
+    except Exception:
+        pass
+    return articles
 
-        for item in items:
-            title = item.title.text.strip()
-            source = item.source.text if item.source else "Google News"
-            summary = item.description.text if item.description else ""
-            summary_clean = BeautifulSoup(summary, "html.parser").get_text()
-            link = item.link.text
-            
-            # Date Parsing
-            published_str = item.pubDate.text if item.pubDate else None
-            is_recent = False
-            
-            if published_str:
-                try:
-                    pub_date = email.utils.parsedate_to_datetime(published_str).replace(tzinfo=None)
-                    if pub_date >= cutoff_date:
-                        is_recent = True
-                except:
-                    is_recent = True 
-
-            if is_recent:
-                # Basic Sentiment
-                blob = TextBlob(summary_clean)
-                sentiment_score = blob.sentiment.polarity
-
-                articles.append({
-                    "title": title,
-                    "source": source,
-                    "link": link,
-                    "summary": summary_clean.strip(),
-                    "published": published_str,
-                    "sentiment": sentiment_score
-                })
-
-            # LIMIT: STRICTLY 10 ARTICLES MAX
-            if len(articles) >= 10: 
-                break
-
-        return articles
-
-    except Exception as e:
-        st.error(f"Error: {e}")
+# --- 3. SOURCE 2: YAHOO FINANCE FETCHER ---
+def fetch_yahoo_news(ticker_symbol):
+    """Fetch latest news from Yahoo Finance API"""
+    articles = []
+    # If the ticker isn't valid (no .NS), skip
+    if ".NS" not in ticker_symbol and ".BO" not in ticker_symbol:
         return []
 
-# --- 3. UI LAYOUT ---
+    try:
+        stock = yf.Ticker(ticker_symbol)
+        yahoo_news = stock.news
+        
+        for item in yahoo_news:
+            # Parse Date (Yahoo gives Unix timestamp)
+            timestamp = item.get('providerPublishTime', 0)
+            pub_date_dt = datetime.fromtimestamp(timestamp)
+            
+            # Yahoo images often clutter, so we skip them and just take text
+            title = item.get('title', '')
+            link = item.get('link', '')
+            publisher = item.get('publisher', 'Yahoo Finance')
+            
+            articles.append({
+                "source_type": "Yahoo",
+                "title": title,
+                "source": f"Yahoo ({publisher})",
+                "link": link,
+                "summary": title, # Yahoo API often puts the summary in the title or separate
+                "published_dt": pub_date_dt,
+                "published_str": pub_date_dt.strftime('%d %b %Y')
+            })
+    except Exception:
+        pass
+    return articles
+
+# --- 4. MERGE & SENTIMENT ENGINE ---
+@st.cache_data(ttl=600)
+def get_combined_news(ticker, company_name):
+    # 1. Get from both sources
+    g_news = fetch_google_news(company_name)
+    y_news = fetch_yahoo_news(ticker)
+    
+    # 2. Combine
+    all_news = g_news + y_news
+    
+    # 3. Sort by Date (Newest First)
+    all_news.sort(key=lambda x: x['published_dt'], reverse=True)
+    
+    # 4. Remove Duplicates (Simple check by Title)
+    seen_titles = set()
+    unique_news = []
+    for article in all_news:
+        if article['title'] not in seen_titles:
+            seen_titles.add(article['title'])
+            
+            # 5. Add Sentiment
+            blob = TextBlob(article['summary'])
+            article['sentiment'] = blob.sentiment.polarity
+            unique_news.append(article)
+            
+    return unique_news[:15] # Return top 15 combined
+
+# --- 5. UI LAYOUT ---
 st.title("StockBytes India ⚡🇮🇳")
-st.caption("Quick, relevant news headlines for Indian Stocks.")
+st.caption("Aggregated News from Google & Yahoo Finance")
 
 # Sidebar
 st.sidebar.header("Controls")
-time_options = {"Last 1 Month": 30, "Last 6 Months": 180, "Last 1 Year": 365}
-selected_time_label = st.sidebar.selectbox("History:", list(time_options.keys()), index=2)
-selected_days = time_options[selected_time_label]
-
-search_query = st.sidebar.text_input("Find Stock:")
+search_query = st.sidebar.text_input("Search Stock:")
 filtered_stocks = {k: v for k, v in STOCKS.items() if search_query.lower() in k.lower() or search_query.lower() in v.lower()}
 selected_ticker = st.sidebar.selectbox("Select Stock:", options=["--- Select ---"] + list(filtered_stocks.keys()))
 
-# Main Area
 if selected_ticker != "--- Select ---":
     company_name = STOCKS[selected_ticker]
-    is_valid_ticker = ".NS" in selected_ticker or ".BO" in selected_ticker
-
-    # 1. Minimalist Header (Price + Name)
+    
+    # Header
     col1, col2 = st.columns([3, 1])
     with col1:
         st.subheader(f"📰 {company_name}")
     with col2:
-        # Just a tiny price check - no charts
-        if is_valid_ticker:
-            try:
-                stock_data = yf.download(selected_ticker, period="1d", progress=False)
-                if not stock_data.empty:
-                    current_price = stock_data['Close'].iloc[-1]
-                    if isinstance(current_price, pd.Series): current_price = current_price.iloc[0]
-                    st.metric("Live Price", f"₹{current_price:.2f}")
-            except:
-                st.write("")
-
+        try:
+            # Minimal Price Check
+            if ".NS" in selected_ticker:
+                data = yf.download(selected_ticker, period="1d", progress=False)
+                if not data.empty:
+                    price = data['Close'].iloc[-1]
+                    if isinstance(price, pd.Series): price = price.iloc[0]
+                    st.metric("Live Price", f"₹{price:.2f}")
+        except:
+            pass
+            
     st.markdown("---")
 
-    # 2. The News List
-    news_articles = fetch_news(company_name, selected_days)
+    # Fetch Data
+    with st.spinner("Fetching news from Google & Yahoo..."):
+        news_list = get_combined_news(selected_ticker, company_name)
 
-    if news_articles:
-        for article in news_articles:
-            # Simple Emoji for Sentiment
-            score = article['sentiment']
-            if score > 0.05: emoji = "🟢"
-            elif score < -0.05: emoji = "🔴"
+    if news_list:
+        for article in news_list:
+            # Sentiment Logic
+            s = article['sentiment']
+            if s > 0.05: emoji = "🟢"
+            elif s < -0.05: emoji = "🔴"
             else: emoji = "⚪"
+            
+            # Badge for Source
+            source_badge = "G" if article['source_type'] == "Google" else "Y"
+            badge_color = "blue" if source_badge == "G" else "purple"
 
-            with st.expander(f"{emoji} {article['source']} | {article['title']}"):
+            with st.expander(f"{emoji} [{source_badge}] {article['title']}"):
+                st.caption(f"Source: {article['source']} | Date: {article['published_str']}")
                 st.write(article['summary'])
-                st.caption(f"📅 {article['published']} | Sentiment: {score:.2f}")
-                st.markdown(f"[🔗 Read Source]({article['link']})")
+                st.markdown(f"[🔗 Read Full Article]({article['link']})")
         
         # Download
         st.markdown("---")
-        df = pd.DataFrame(news_articles)
-        st.download_button("📥 Save Headlines (CSV)", data=df.to_csv(index=False), file_name=f"{company_name}_headlines.csv")
-        
+        df = pd.DataFrame(news_list)
+        # Drop the datetime object before saving to CSV (it looks messy)
+        if not df.empty:
+            df = df.drop(columns=['published_dt'])
+        st.download_button("📥 Save News (CSV)", data=df.to_csv(index=False), file_name=f"{company_name}_news.csv")
     else:
-        st.info(f"No recent news found for {company_name} in the last {selected_days} days.")
-
+        st.info("No recent news found.")
 else:
-    st.info("👈 Select a stock from the sidebar to fetch news.")
+    st.info("👈 Select a stock to view aggregated news.")
