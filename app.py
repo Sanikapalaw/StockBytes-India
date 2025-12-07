@@ -98,20 +98,16 @@ def fetch_yahoo_news(ticker_symbol):
 
 @st.cache_data(ttl=600)
 def get_combined_news(ticker, company_name):
-    # Fetch from both
     g_news = fetch_google_news(company_name)
     y_news = fetch_yahoo_news(ticker)
     
-    # Merge
     all_news = g_news + y_news
     all_news.sort(key=lambda x: x['published_dt'], reverse=True)
     
-    # Remove Duplicates
     seen, unique = set(), []
     for art in all_news:
         if art['title'] not in seen:
             seen.add(art['title'])
-            # Add Sentiment
             blob = TextBlob(art['summary'])
             art['sentiment'] = blob.sentiment.polarity
             unique.append(art)
@@ -159,19 +155,24 @@ if selected_ticker != "--- Select ---":
         else:
             if st.button("❤️ Watch"): st.session_state.watchlist.append(selected_ticker); st.rerun()
 
-    # --- UPDATED LIVE PRICE (5d FIX) ---
+    # --- FIX: ROBUST PRICE FETCHING (1 MO History) ---
     if ".NS" in selected_ticker:
         try:
-            # Fetch 5 days so it finds Friday's price even on Sunday
-            data = yf.download(selected_ticker, period="5d", progress=False)
+            # We fetch '1mo' (1 Month) of data.
+            # This guarantees we find the last trading day even if today is Sunday/Holiday.
+            data = yf.download(selected_ticker, period="1mo", progress=False)
             
             if not data.empty:
+                # .iloc[-1] grabs the absolute last row (latest price)
                 price = data['Close'].iloc[-1]
+                
+                # Handling yfinance data types safely
                 if isinstance(price, pd.Series): 
                     price = price.iloc[0]
+                
                 c3.metric("Live Price", f"₹{float(price):.2f}")
             else:
-                c3.caption("Price N/A")
+                c3.caption("Price N/A (No Data)")
         except Exception as e: 
             c3.caption("Price Error")
     
