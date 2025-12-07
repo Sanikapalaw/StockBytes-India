@@ -159,15 +159,21 @@ if selected_ticker != "--- Select ---":
         else:
             if st.button("❤️ Watch"): st.session_state.watchlist.append(selected_ticker); st.rerun()
 
-    # Live Price Check
+    # --- UPDATED LIVE PRICE (5d FIX) ---
     if ".NS" in selected_ticker:
         try:
-            data = yf.download(selected_ticker, period="1d", progress=False)
+            # Fetch 5 days so it finds Friday's price even on Sunday
+            data = yf.download(selected_ticker, period="5d", progress=False)
+            
             if not data.empty:
                 price = data['Close'].iloc[-1]
-                if isinstance(price, pd.Series): price = price.iloc[0]
-                c3.metric("Live Price", f"₹{price:.2f}")
-        except: pass
+                if isinstance(price, pd.Series): 
+                    price = price.iloc[0]
+                c3.metric("Live Price", f"₹{float(price):.2f}")
+            else:
+                c3.caption("Price N/A")
+        except Exception as e: 
+            c3.caption("Price Error")
     
     # Quick Compare Buttons
     peers = get_peers(selected_ticker)
@@ -182,7 +188,7 @@ if selected_ticker != "--- Select ---":
     
     st.markdown("---")
 
-    # MAIN CONTENT: Just the News List
+    # MAIN CONTENT: News List
     with st.spinner("Scanning Google & Yahoo Finance..."):
         news_list = get_combined_news(selected_ticker, company_name)
 
