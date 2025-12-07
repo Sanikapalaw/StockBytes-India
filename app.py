@@ -57,63 +57,49 @@ def get_peers(current_ticker):
             return [t for t in tickers if t != current_ticker][:4] 
     return []
 
-# --- 3. DUAL NEWS FETCHING ---
-
+# --- 3. GOOGLE NEWS FETCHING (Robust) ---
+@st.cache_data(ttl=600)
 def fetch_google_news(company_name):
-    """Source 1: Google RSS"""
+    """Fetch Top 20 News Items from Google RSS"""
+    # Query: Last 1 Year + Financial Keywords
     query = f'{company_name} share price target buy sell results when:1y'
     rss_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-IN&gl=IN&ceid=IN:en"
+    
     articles = []
     try:
         response = requests.get(rss_url, timeout=5)
         soup = BeautifulSoup(response.content, features="xml")
-        for item in soup.findAll('item')[:10]:
-            try: pub_date_dt = email.utils.parsedate_to_datetime(item.pubDate.text).replace(tzinfo=None)
-            except: pub_date_dt = datetime.now()
+        
+        for item in soup.findAll('item')[:20]: # Limit to 20 items
+            # Parse Date
+            try: 
+                pub_date_dt = email.utils.parsedate_to_datetime(item.pubDate.text).replace(tzinfo=None)
+            except: 
+                pub_date_dt = datetime.now()
+            
+            # Parse Summary
+            summary_text = BeautifulSoup(item.description.text, "html.parser").get_text()
+            
+            # Sentiment
+            blob = TextBlob(summary_text)
+            sentiment_score = blob.sentiment.polarity
+            
             articles.append({
-                "source_type": "Google", "title": item.title.text.strip(),
+                "title": item.title.text.strip(),
                 "source": item.source.text if item.source else "Google News",
-                "link": item.link.text, "summary": BeautifulSoup(item.description.text, "html.parser").get_text(),
-                "published_dt": pub_date_dt, "published_str": pub_date_dt.strftime('%d %b %Y')
+                "link": item.link.text,
+                "summary": summary_text,
+                "sentiment": sentiment_score,
+                "published_dt": pub_date_dt,
+                "published_str": pub_date_dt.strftime('%d %b %Y')
             })
-    except: pass
+            
+    except Exception as e:
+        print(f"Error: {e}")
+        
     return articles
 
-def fetch_yahoo_news(ticker_symbol):
-    """Source 2: Yahoo Finance"""
-    if ".NS" not in ticker_symbol and ".BO" not in ticker_symbol: return []
-    articles = []
-    try:
-        stock = yf.Ticker(ticker_symbol)
-        for item in stock.news:
-            pub_date_dt = datetime.fromtimestamp(item.get('providerPublishTime', 0))
-            articles.append({
-                "source_type": "Yahoo", "title": item.get('title', ''),
-                "source": f"Yahoo ({item.get('publisher', '')})",
-                "link": item.get('link', ''), "summary": item.get('title', ''),
-                "published_dt": pub_date_dt, "published_str": pub_date_dt.strftime('%d %b %Y')
-            })
-    except: pass
-    return articles
-
-@st.cache_data(ttl=600)
-def get_combined_news(ticker, company_name):
-    g_news = fetch_google_news(company_name)
-    y_news = fetch_yahoo_news(ticker)
-    
-    all_news = g_news + y_news
-    all_news.sort(key=lambda x: x['published_dt'], reverse=True)
-    
-    seen, unique = set(), []
-    for art in all_news:
-        if art['title'] not in seen:
-            seen.add(art['title'])
-            blob = TextBlob(art['summary'])
-            art['sentiment'] = blob.sentiment.polarity
-            unique.append(art)
-    return unique[:20]
-
-# --- 4. SIDEBAR UI ---
+# --- 4. SIDEBAR ---
 st.sidebar.header("❤️ Watchlist")
 if st.session_state.watchlist:
     for saved in st.session_state.watchlist:
@@ -139,13 +125,14 @@ selected_ticker = st.sidebar.selectbox("Select Stock:", ["--- Select ---"] + lis
 if selected_ticker != "--- Select ---":
     st.session_state.selected_ticker = selected_ticker
 
-# --- 5. MAIN DASHBOARD ---
-st.title("StockBytes Pro ⚡🇮🇳")
+# --- 5. MAIN PAGE ---
+# FIXED TITLE: Removed the flag emoji to prevent "IN" error
+st.title("StockBytes Pro ⚡ India")
 
 if selected_ticker != "--- Select ---":
     company_name = STOCKS[selected_ticker]
     
-    # Header Area
+    # Header
     c1, c2, c3 = st.columns([2, 1, 1])
     c1.subheader(f"{company_name}")
     
@@ -155,28 +142,20 @@ if selected_ticker != "--- Select ---":
         else:
             if st.button("❤️ Watch"): st.session_state.watchlist.append(selected_ticker); st.rerun()
 
-    # --- FIX: ROBUST PRICE FETCHING (1 MO History) ---
+    # Live Price (Robust 1-Month Lookback for Sunday Reliability)
     if ".NS" in selected_ticker:
         try:
-            # We fetch '1mo' (1 Month) of data.
-            # This guarantees we find the last trading day even if today is Sunday/Holiday.
             data = yf.download(selected_ticker, period="1mo", progress=False)
-            
             if not data.empty:
-                # .iloc[-1] grabs the absolute last row (latest price)
                 price = data['Close'].iloc[-1]
-                
-                # Handling yfinance data types safely
-                if isinstance(price, pd.Series): 
-                    price = price.iloc[0]
-                
+                if isinstance(price, pd.Series): price = price.iloc[0]
                 c3.metric("Live Price", f"₹{float(price):.2f}")
             else:
-                c3.caption("Price N/A (No Data)")
-        except Exception as e: 
+                c3.caption("Price N/A")
+        except: 
             c3.caption("Price Error")
     
-    # Quick Compare Buttons
+    # Quick Compare
     peers = get_peers(selected_ticker)
     if peers:
         st.markdown("##### ⚡ Quick Compare:")
@@ -189,17 +168,17 @@ if selected_ticker != "--- Select ---":
     
     st.markdown("---")
 
-    # MAIN CONTENT: News List
-    with st.spinner("Scanning Google & Yahoo Finance..."):
-        news_list = get_combined_news(selected_ticker, company_name)
+    # Fetch News
+    with st.spinner(f"Fetching latest news for {company_name}..."):
+        news_list = fetch_google_news(company_name)
 
     if news_list:
         st.subheader(f"Latest News ({len(news_list)} Articles)")
-        st.caption("Aggregated from Google News & Yahoo Finance")
+        st.caption("Source: Google News")
         
         for article in news_list:
             s = article['sentiment']
-            # Determine Color/Emoji
+            # Emoji Logic
             if s > 0.05:
                 emoji = "🟢"
             elif s < -0.05:
@@ -207,18 +186,15 @@ if selected_ticker != "--- Select ---":
             else:
                 emoji = "⚪"
             
-            # Source Badge
-            source_badge = "Google" if article['source_type'] == "Google" else "Yahoo"
-            
-            with st.expander(f"{emoji} [{source_badge}] {article['title']}"):
+            with st.expander(f"{emoji} {article['title']}"):
                 st.caption(f"{article['published_str']} | {article['source']}")
                 st.write(article['summary'])
                 st.markdown(f"[🔗 Read Full Article]({article['link']})")
         
-        # Download Button
-        df = pd.DataFrame(news_list).drop(columns=['published_dt']) if news_list else pd.DataFrame()
-        st.download_button("📥 Download News CSV", df.to_csv(index=False), f"{company_name}.csv")
+        # Download
+        df = pd.DataFrame(news_list).drop(columns=['published_dt'])
+        st.download_button("📥 Download CSV", df.to_csv(index=False), f"{company_name}.csv")
     else:
-        st.info("No recent news found from Google or Yahoo.")
+        st.info("No recent news found.")
 else:
     st.info("👈 Select a stock to start.")
