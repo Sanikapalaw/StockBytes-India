@@ -6,7 +6,6 @@ import pandas as pd
 import yfinance as yf
 from textblob import TextBlob
 import email.utils
-import plotly.graph_objects as go
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="StockBytes Pro", page_icon="⚡", layout="wide")
@@ -58,10 +57,10 @@ def get_peers(current_ticker):
             return [t for t in tickers if t != current_ticker][:4] 
     return []
 
-# --- 3. FETCH FUNCTIONS (DUAL SOURCE) ---
+# --- 3. DUAL NEWS FETCHING ---
 
-# A. Google Fetcher
 def fetch_google_news(company_name):
+    """Source 1: Google RSS"""
     query = f'{company_name} share price target buy sell results when:1y'
     rss_url = f"https://news.google.com/rss/search?q={query.replace(' ', '+')}&hl=en-IN&gl=IN&ceid=IN:en"
     articles = []
@@ -80,8 +79,8 @@ def fetch_google_news(company_name):
     except: pass
     return articles
 
-# B. Yahoo Fetcher
 def fetch_yahoo_news(ticker_symbol):
+    """Source 2: Yahoo Finance"""
     if ".NS" not in ticker_symbol and ".BO" not in ticker_symbol: return []
     articles = []
     try:
@@ -97,28 +96,28 @@ def fetch_yahoo_news(ticker_symbol):
     except: pass
     return articles
 
-# C. Merger Logic
 @st.cache_data(ttl=600)
 def get_combined_news(ticker, company_name):
     # Fetch from both
     g_news = fetch_google_news(company_name)
     y_news = fetch_yahoo_news(ticker)
     
-    # Combine & Sort
+    # Merge
     all_news = g_news + y_news
     all_news.sort(key=lambda x: x['published_dt'], reverse=True)
     
-    # Deduplicate & Add Sentiment
+    # Remove Duplicates
     seen, unique = set(), []
     for art in all_news:
         if art['title'] not in seen:
             seen.add(art['title'])
+            # Add Sentiment
             blob = TextBlob(art['summary'])
             art['sentiment'] = blob.sentiment.polarity
             unique.append(art)
-    return unique[:20] # Return top 20
+    return unique[:20]
 
-# --- 4. UI SIDEBAR ---
+# --- 4. SIDEBAR UI ---
 st.sidebar.header("❤️ Watchlist")
 if st.session_state.watchlist:
     for saved in st.session_state.watchlist:
@@ -145,7 +144,7 @@ if selected_ticker != "--- Select ---":
     st.session_state.selected_ticker = selected_ticker
 
 # --- 5. MAIN DASHBOARD ---
-st.title("StockBytes India ⚡🇮🇳")
+st.title("StockBytes Pro ⚡🇮🇳")
 
 if selected_ticker != "--- Select ---":
     company_name = STOCKS[selected_ticker]
@@ -160,6 +159,7 @@ if selected_ticker != "--- Select ---":
         else:
             if st.button("❤️ Watch"): st.session_state.watchlist.append(selected_ticker); st.rerun()
 
+    # Live Price Check
     if ".NS" in selected_ticker:
         try:
             data = yf.download(selected_ticker, period="1d", progress=False)
@@ -169,7 +169,7 @@ if selected_ticker != "--- Select ---":
                 c3.metric("Live Price", f"₹{price:.2f}")
         except: pass
     
-    # Quick Compare
+    # Quick Compare Buttons
     peers = get_peers(selected_ticker)
     if peers:
         st.markdown("##### ⚡ Quick Compare:")
@@ -182,59 +182,35 @@ if selected_ticker != "--- Select ---":
     
     st.markdown("---")
 
-    # Fetch Data
+    # MAIN CONTENT: Just the News List
     with st.spinner("Scanning Google & Yahoo Finance..."):
         news_list = get_combined_news(selected_ticker, company_name)
 
     if news_list:
-        # --- NEW: DARK MODE DONUT CHART ---
-        
-        # 1. Calculate Breakdown
-        pos = sum(1 for a in news_list if a['sentiment'] > 0.05)
-        neg = sum(1 for a in news_list if a['sentiment'] < -0.05)
-        neu = len(news_list) - (pos + neg)
-        
-        # 2. Create Chart
-        labels = ['Bullish (Positive)', 'Bearish (Negative)', 'Neutral']
-        values = [pos, neg, neu]
-        colors = ['#00FF00', '#FF0000', '#808080'] # Neon Green, Neon Red, Grey
-
-        fig = go.Figure(data=[go.Pie(
-            labels=labels, 
-            values=values, 
-            hole=.6, # Makes it a Donut
-            marker=dict(colors=colors, line=dict(color='#000000', width=2))
-        )])
-
-        # 3. DARK MODE STYLING
-        fig.update_layout(
-            title_text="Sentiment Distribution",
-            title_font_color="white",
-            paper_bgcolor='black', # Background of the container
-            plot_bgcolor='black',  # Background of the chart
-            font=dict(color='white'), # All text white
-            showlegend=True,
-            margin=dict(t=50, b=20, l=20, r=20),
-            height=300
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-        # ----------------------------------
-
-        st.subheader(f"News Feed ({len(news_list)} Articles)")
+        st.subheader(f"Latest News ({len(news_list)} Articles)")
+        st.caption("Aggregated from Google News & Yahoo Finance")
         
         for article in news_list:
             s = article['sentiment']
-            emoji = "🟢" if s > 0.05 else ("🔴" if s < -0.05 else "⚪")
-            badge = "Google" if article['source_type'] == "Google" else "Yahoo"
+            # Determine Color/Emoji
+            if s > 0.05:
+                emoji = "🟢"
+            elif s < -0.05:
+                emoji = "🔴"
+            else:
+                emoji = "⚪"
             
-            with st.expander(f"{emoji} [{badge}] {article['title']}"):
+            # Source Badge
+            source_badge = "Google" if article['source_type'] == "Google" else "Yahoo"
+            
+            with st.expander(f"{emoji} [{source_badge}] {article['title']}"):
                 st.caption(f"{article['published_str']} | {article['source']}")
                 st.write(article['summary'])
-                st.markdown(f"[Read Full Article]({article['link']})")
+                st.markdown(f"[🔗 Read Full Article]({article['link']})")
         
+        # Download Button
         df = pd.DataFrame(news_list).drop(columns=['published_dt']) if news_list else pd.DataFrame()
-        st.download_button("📥 Download CSV", df.to_csv(index=False), f"{company_name}.csv")
+        st.download_button("📥 Download News CSV", df.to_csv(index=False), f"{company_name}.csv")
     else:
         st.info("No recent news found from Google or Yahoo.")
 else:
